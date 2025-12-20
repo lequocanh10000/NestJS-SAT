@@ -20,27 +20,42 @@ export class SeedService {
 
     ) {}
 
+    private async clearExisting(transaction: Transaction) {
+        await this.irlParameterModel.destroy({ where: {}, transaction });
+        await this.questionChoiceModel.destroy({ where: {}, transaction });
+        await this.questionModel.destroy({ where: {}, transaction });
+    }
+
     private async seedQuestions(transaction: Transaction) {
-        return await this.questionModel.bulkCreate(questions as any, { transaction})
+        const created: Question[] = [];
+        for (const q of questions) {
+            const saved = await this.questionModel.create(q as any, { transaction });
+            created.push(saved);
+        }
+        return created;
     }
 
-    private async seedQuestionChoices(transaction: Transaction) {
-        return await this.questionChoiceModel.bulkCreate(questionChoices as any, { transaction})
+    private async seedQuestionChoices(transaction: Transaction, idMap: Map<number, number>) {
+        const payload = questionChoices.map(c => ({ ...c, questionId: idMap.get(c.questionId)! }));
+        return await this.questionChoiceModel.bulkCreate(payload as any, { transaction });
     }
 
-    private async seedIRL(transaction: Transaction) {
-        return await this.irlParameterModel.bulkCreate(irtParameters as any, { transaction})
+    private async seedIRL(transaction: Transaction, idMap: Map<number, number>) {
+        const payload = irtParameters.map(p => ({ ...p, questionId: idMap.get(p.questionId)! }));
+        return await this.irlParameterModel.bulkCreate(payload as any, { transaction });
     }
 
     async initSeedData() {
-        const transaction = await this.sequelize.transaction(); // trả lại các thao tác trước đó
+        const transaction = await this.sequelize.transaction();
         try {
-            await this.seedQuestions(transaction);
-            await this.seedQuestionChoices(transaction);
-            await this.seedIRL(transaction);
-
+            await this.clearExisting(transaction);
+            const created = await this.seedQuestions(transaction);
+            const idMap = new Map<number, number>();
+            created.forEach((q, idx) => idMap.set(idx + 1, q.id));
+            await this.seedQuestionChoices(transaction, idMap);
+            await this.seedIRL(transaction, idMap);
             await transaction.commit();
-            return { message: 'Seed data success'}
+            return { message: 'Seed data success' }
         } catch(error) {
             await transaction.rollback();
             throw new BadRequestException('Seed data failed');
